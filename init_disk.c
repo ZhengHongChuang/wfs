@@ -39,7 +39,7 @@
 int main()
 {
     FILE *fp=NULL;
-    fp = fopen("diskimg1", "r+");//打开文件
+    fp = fopen("diskimg", "r+");//打开文件
 	if (fp == NULL) {
 		printf("打开文件失败，文件不存在\n");return 0;
     }

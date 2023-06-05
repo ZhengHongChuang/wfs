@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "stddef.h": "c",
+        "string.h": "c",
+        "wfs.h": "c",
+        "malloc.h": "c",
+        "assert.h": "c",
+        "unistd.h": "c",
+        "stat.h": "c"
+    }
+}

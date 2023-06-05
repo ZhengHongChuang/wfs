@@ -22,7 +22,7 @@ struct file_directory {
     char fext[MAX_EXTENSION + 1]; //扩展名 (plus space for nul)
     time_t atime; 	/* 上次访问时间 */
     time_t mtime;	/*上次修改时间 */
-//    time_t ctime; 	/* 上次文件状态改变时间 */
+    // time_t ctime; 	/* 上次文件状态改变时间 */
     int uid;        //
     int mode;       //
     size_t fsize;   //文件大小（file size）
@@ -51,7 +51,15 @@ int setattr(const char* path, struct file_directory* attr, int flag);
 void ClearBlocks(long next_blk, struct data_block* data_blk);
 int get_empty_blk(int num, long* start_blk);
 
+//新增函数
+int increase_blk(long par_dir_stblk, struct file_directory *file_dir,struct data_block *data_blk, long *tmp, char*p, char*q, int flag);
+void init_file_data(struct file_directory *file_dir, char *m, char *n, int flag);
+
 //功能函数声明
 int get_fd_to_attr(const char * path,struct file_directory *attr);
 int create_file_dir(const char* path, int flag);
 int remove_file_dir(const char *path, int flag);
+
+
+
+// int fuse_session_loop();

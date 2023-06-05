@@ -1,5 +1,4 @@
 #define FUSE_USE_VERSION 31
-
 #include <fuse3/fuse.h>
 #include <time.h>
 #include <stdio.h>
@@ -16,6 +15,35 @@
 
 #include "WFS.h"
 
+
+
+
+//为目录或者文件的stat赋值
+void init_file_data(struct file_directory *file_dir, char *m, char *n, int flag)
+{
+        // 给新建的file_directory赋值
+        strcpy(file_dir->fname, m);
+        if (flag == 1 && *n != '\0')
+            strcpy(file_dir->fext, n);
+        file_dir->fsize = 0;
+		printf("--------新建的flag=%d-------",flag);
+        file_dir->flag = flag;
+
+        time_t now_time;
+        time(&now_time);
+        file_dir->atime = now_time;
+        file_dir->mtime = now_time;
+        if (flag == 1)
+        {
+                file_dir->mode = S_IFREG | 0766;
+        }
+        else if (flag == 2)
+        {
+                file_dir->mode = S_IFDIR | 0766;
+        }
+        file_dir->uid = getuid();
+}
+
 //该函数为读取并复制file_directory结构的内容，因为文件系统所有对文件的操作都需要先从文件所在目录
 //读取file_directory信息,然后才能找到文件在磁盘的位置，后者的数据复制给前者
 void read_cpy_file_dir(struct file_directory *a,struct file_directory *b) {
@@ -25,6 +53,10 @@ void read_cpy_file_dir(struct file_directory *a,struct file_directory *b) {
 	a->fsize = b->fsize;
 	a->nStartBlock = b->nStartBlock;
 	a->flag = b->flag;
+	a->atime = b->atime;
+	a ->mtime = b->mtime;
+	a ->mode = b->mode;
+	a ->uid = a->uid;
 }
 
 //根据文件的块号，从磁盘（5M大文件）中读取数据
@@ -69,22 +101,30 @@ int write_data_block(long blk_no,struct data_block *data_blk) {
 int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, int flag, int *par_size) {
 	printf("divide_path：函数开始\n\n");
 	char *tmp_path,*m,*n;
+	//tmp_path: 记录原始路径
 	tmp_path=strdup(path);//用来记录最原始的路径
 	struct file_directory* attr = malloc(sizeof(struct file_directory));
 
 	m=tmp_path;
 	if(!m) return -errno;//路径为空
-	m++;//跳过第一个'/'
+	//跳过第一个'/'
+	m++;
 	
+	//找寻下一个‘/’的位置
 	n=strchr(m,'/');//看是否有二级路径
 
 	//如果找到二级路径的'/'，并且要创建的是目录，那么不允许，返回-1
-	if(n!=NULL && flag==2) {printf("错误：divide_path:二级路径下不能再创建目录，函数结束返回-EPERM\n\n");return -EPERM;}
+	if(n!=NULL && flag==2) {
+		printf("错误：divide_path:二级路径下不能再创建目录，函数结束返回-EPERM\n\n");
+		return -EPERM;}
 	else if(n!=NULL)	{
 		printf("divide_path:要创建的是二级路径下的文件\n\n");
+		//将第二个‘/’赋值为空
 		*n='\0';
 		n++;//此时n指向要创建的文件名的第一个字母
+		//将文件名.后缀名赋值给m
 		m=n;
+		printf("此时tmp_path的值：%s\n\n",tmp_path);
 		if(get_fd_to_attr(tmp_path,attr)==-1)
 		{//读取该path的父目录，确认这个父目录是存在的
 			printf("错误：divide_path：找不到二级路径的父目录，函数结束返回-ENOENT\n\n");
@@ -168,6 +208,7 @@ int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, in
 int exist_check(struct file_directory *file_dir, char *p, char *q, int *offset, int *pos, int size, int flag) 
 {
 	printf("exist_check：现在开始检查该data_blk是否存在重名的对象\n\n");
+	printf("exist_check：现在文件夹已用大小%d\n\n",size);
 	while (*offset < size) 	{
 		if (flag == 0) *pos = *offset;
 		//如果文件名、后缀名（无后缀名）皆匹配
@@ -194,7 +235,9 @@ int exist_check(struct file_directory *file_dir, char *p, char *q, int *offset, 
 //在bitmap中标记第start_blk块是否被使用（flag=0,1)
 int set_blk_use(long start_blk,int flag) {
 	printf("set_blk_use：函数开始");
-	if(start_blk==-1) {printf("错误：set_blk_use：你和我开玩笑？start_blk为-1，函数结束返回\n\n");return -1;}
+	if(start_blk==-1) {
+		printf("错误：set_blk_use：你和我开玩笑？start_blk为-1，函数结束返回\n\n");
+		return -1;}
 	
 	int start=start_blk/8;//因为每个byte有8bits，要找到start_blk在bitmap的第几个byte中，要除以8
 	int left=8-(start_blk%8);//计算在bitmap中的这个byte的第几位表示该块
@@ -407,33 +450,48 @@ int get_empty_blk(int num, long* start_blk) {
 
 //根据文件的路径，到相应的目录寻找该文件的file_directory，并赋值给attr
 int get_fd_to_attr(const char * path,struct file_directory *attr) {
+
+	printf("get_fd_to_attr：函数开始\n\n");
+	printf("get_fd_to_attr：要寻找的file_directory的路径是%s\n\n",path);
+
 	//先要读取超级块，获取磁盘根目录块的位置
 	struct data_block *data_blk;
 	data_blk = malloc(sizeof(struct data_block));
+	// printf("data_blk的char--->%s\n",data_blk->data);
 
 	//把超级块读出来
 	if (read_cpy_data_block(0, data_blk) == -1) 	{
 		printf("get_fd_to_attr：读取超级块失败，函数结束返回\n\n");
 		free(data_blk);	return -1;
 	}
+	// printf("data_blk的char--->%ld\n",data_blk->data);
 	struct super_block* sb_blk;
+
 	sb_blk = (struct super_block*) data_blk;
 	long start_blk;
 	start_blk = sb_blk->first_blk;
+	// printf("sb_blk的char--->%ld\n",sb_blk->bitmap);
+	
 
-	char *tmp_path,*m;//tmp_path用来临时记录路径，然后m,n两个指针是用来定位文件名和
-	tmp_path=strdup(path);m=tmp_path;
+	char *tmp_path,*m,*n;//tmp_path用来临时记录路径，然后m,n两个指针是用来定位文件名和
+	tmp_path=strdup(path);
+	m=tmp_path;
 
 	//如果路径为空，则出错返回1
 	if (!tmp_path) 	{
 		printf("错误：get_fd_to_attr：路径为空，函数结束返回\n\n");
-		free(sb_blk);return -1;
+		free(sb_blk);
+		return -1;
 	}
 	
+
 	//如果路径为根目录路径(注意这里的根目录是指/home/linyueq/homework/diskimg/???，/???之前的路径是被忽略的)
 	if (strcmp(tmp_path, "/") == 0) 	{
+
 		attr->flag = 2;//2代表路径
 		attr->nStartBlock = start_blk;
+		
+		
 		free(sb_blk);
 		printf("get_fd_to_attr：这是一个根目录，直接构造file_directory并返回0，函数结束返回\n\n");
 		return 0;
@@ -445,6 +503,28 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 	//先往后移一位，跳过第一个'/'，然后检查一下这个路径是不是有两个'/'，如果有，说明路径是/hehe/a.txt形
 	m++;
 
+
+	n=strchr(m,'/');
+	if (n!=NULL)
+	{
+		*n='\0';
+		//路径如/hehe/a.txt所以采用递归查找/hehe
+		get_fd_to_attr(tmp_path, attr);
+		start_blk = attr->nStartBlock;
+		n++;
+		m = n;	
+	}
+	
+
+	// n = strchr(m,'.');
+	// if(n!=NULL){
+	// 	*n='\0';
+	// 	n++;
+	// }
+
+
+
+
 	//struct data_block *data_blk=malloc(sizeof(struct data_block));
 
 	//读取根目录文件的信息，失败的话返回-1
@@ -453,33 +533,146 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 	}
 
 	//强制类型转换，读取根目录中文件的信息，根目录块中装的都是struct file_directory
-	struct file_directory *file_dir =(struct file_directory*)data_blk->data;
-	int i=0;
-	while (i<512/sizeof(struct file_directory)) {
-		char tempfilename[20];
-		strcpy(tempfilename,file_dir->fname);
-		if (file_dir->fext[0]!=0) {
+	// struct file_directory *file_dir =(structf file_directory*)data_blk->data;
+	int i ;
+	
+	
+
+	// do
+	
+	while (1){
+		i=0;
+		struct file_directory *file_dir = (struct file_directory *)data_blk->data;
+		while (i<512/sizeof(struct file_directory)) {
+			char tempfilename[20];
+			strcpy(tempfilename,file_dir->fname);
+			printf("tempfilename的值%s\n",tempfilename);
+			if (file_dir->fext[0]!=0) {
 			strcat(tempfilename,".");
 			strcat(tempfilename,file_dir->fext);
+			printf("tempfilename的值%s\n",tempfilename);
+			}
+			if(strcmp(m,tempfilename)==0) { //found speafied file
+				attr->flag=file_dir->flag;  // for file
+				strcpy(attr->fname, file_dir->fname);
+				strcpy(attr->fext, file_dir->fext);
+				attr->atime = file_dir->atime;
+				attr->mtime = file_dir->mtime;
+				attr->mode = file_dir->mode;
+				attr->uid = file_dir->uid;
+
+				attr->fsize = file_dir->fsize;
+				attr->nStartBlock = file_dir->nStartBlock;
+				free(data_blk);
+				return(0);
+			}
+			file_dir++;
+			i++;
 		}
-		if(strcmp(m,tempfilename)==0) { //found speafied file
-			attr->flag=1;  // for file
-			strcpy(attr->fname,file_dir->fname);
-			strcpy(attr->fext,file_dir->fext);
-			attr->fsize=file_dir->fsize;
-			attr->nStartBlock=file_dir->nStartBlock;
+		// 没有找到则判断是否data_blk->nNextBlock ！= -1
+		if (data_blk->nNextBlock == -1||data_blk->nNextBlock == 0)
+		{
+			// break;
+			//循环结束都还没找到，则返回-1
+			printf("get_fd_to_attr：在父目录下没有找到该path的file_directory\n\n");
 			free(data_blk);
-			return(0);
+			return -1;
 		}
-		file_dir++;
-		i++;
+		if (read_cpy_data_block(data_blk->nNextBlock, data_blk) == -1)
+		{
+			free(data_blk);
+			free(file_dir);
+			printf("错误：create_file_dir:从目录块中读取目录信息到data_blk时出错\n\n");
+			return -1;
+		}
 	}
-	
-	//循环结束都还没找到，则返回-1
-	printf("get_fd_to_attr：在父目录下没有找到该path的file_directory\n\n");
-	free(data_blk);
-	return -1;
 }
+
+
+
+
+//目录的信息超过512Bytes时为其添加一个块
+/*args:
+	①包括父目录的起始块位置（par_dir_stblk）
+	②指向文件目录结构体的指针（file_dir）
+	③指向数据块结构体的指针（data_blk）
+	④临时变量指针（tmp）
+	⑤目录名和扩展名
+	⑥文件目录新增是文件还是文件夹
+*/
+int increase_blk(long par_dir_stblk, struct file_directory *file_dir,struct data_block *data_blk, long *tmp, char*m, char*n, int flag) 
+{
+	printf("increase_blk:开始分配新块\n");
+	//新块的位置
+	long new_blk;
+	tmp=malloc(sizeof(long));
+	//首先我们用get_empty_blk找到一个空闲块
+	if(get_empty_blk(1,tmp)==1){
+		printf("成功:increase_blk成功获取一个新块\n");
+		//将空闲块位置赋值给new_nlk
+		new_blk=*tmp;
+	}else{//如果没找到则直接返回错误信息
+		printf("错误：increase_blk无法获取新块\n");
+		free(m);
+		free(n);
+		return -errno;
+	}
+	free(tmp);
+	//找到的话直接给上层目录增加一个块
+	data_blk->nNextBlock=new_blk;
+	//因为添加了new_blk的位置所以需要在fp中重写之之前的data_blk
+	write_data_block(par_dir_stblk, data_blk);
+	//为新块添加信息
+	data_blk->size=sizeof(struct file_directory);
+	data_blk->nNextBlock=-1;
+	file_dir=(struct file_directory*)data_blk->data;
+	//写入文件或目录的名称
+	init_file_data(file_dir,m,n,flag);
+	// strcpy(file_dir->fname, m);
+	// struct fuse_context *ctx = fuse_get_context();
+    // // 获取当前用户的用户 ID
+    // uid_t user_id = ctx->uid;
+	// time_t current_time = time(NULL);  // 获取当前时间
+	// file_dir->atime= current_time;  // 设置访问时间
+	// file_dir->mtime = current_time;  // 设置修改时间
+	// file_dir->fsize = 0;
+	// file_dir->flag = flag;
+	// // file_dir->mode = S_IFDIR | 0666;//设置成目录,S_IFDIR和0666（8进制的文件权限掩码），这里进行或运算
+	// //若为文件且有拓展名则写入
+	// if (flag == 2 ){
+	// 	file_dir->mode = S_IFDIR | 0666;//设置成目录,S_IFDIR和0666（8进制的文件权限掩码），这里进行或运算
+	// 	strcpy(file_dir->fext, n);
+	// } else{
+	// 	file_dir->mode = S_IFREG | 0666;//该文件是	一般文件
+	// 	if(*n!='\0'){
+	// 		strcpy(file_dir->fext, n);	
+	// 	}
+		
+	// }
+	tmp=malloc(sizeof(long));
+	if(get_empty_blk(1,tmp)==1){
+		file_dir->nStartBlock=*tmp;}
+	else {
+		free(m);
+		free(n);
+		free(data_blk);
+		free(file_dir);
+		printf("错误：increase_blk无法获取新块\n");
+		return -errno;
+	}
+
+	//为new_blk记录的新块写入data_blk
+	write_data_block(new_blk,data_blk);
+	//更新data_blk的内容
+	data_blk->size=0;
+	data_blk->nNextBlock=-1;
+	strcpy(data_blk->data,"\0");
+	//将新文件数据块写入磁盘：将新文件数据块（data_blk）写入刚刚为新文件申请到的空闲块中。
+	write_data_block(file_dir->nStartBlock,data_blk);
+	printf("increase_blk:文件拓展成功\n");
+	return 0;
+}
+
 
 //创建path所指的文件或目录的file_directory，并为该文件（目录）申请空闲块，创建成功返回0，创建失败返回-1
 //mkdir和mknod这两种操作都要用到
@@ -490,8 +683,10 @@ int create_file_dir(const char* path, int flag) {
 	char *m = malloc(15 * sizeof(char)), *n = malloc(15 * sizeof(char));//用于存放文件名和扩展名
 	//拆分路径，找到父级目录起始块
 	if ((res = divide_path(m, n, path, &par_dir_blk, flag,&par_size))) 	{
-		free(m);free(n);
-		printf("错误：create_file_dir:divide_path时出错\n\n");return res=-1;
+		free(m);
+		free(n);
+		printf("错误：create_file_dir:divide_path时出错\n\n");
+		return res=-1;
 	}
 
 	struct data_block *data_blk = malloc(sizeof(struct data_block));
@@ -499,21 +694,33 @@ int create_file_dir(const char* path, int flag) {
 	int offset = 0;
 	int pos;
 
-	//从目录块中读取目录信息到data_blk
-	if (read_cpy_data_block(par_dir_blk, data_blk) == -1) 		{
-		free(data_blk);free(file_dir);free(m);free(n);
-		printf("错误：create_file_dir:从目录块中读取目录信息到data_blk时出错\n\n");return -ENOENT;
-	}
 
-	file_dir =(struct file_directory*) data_blk->data;
-	offset = 0;
-	pos = data_blk->size;
+	while(1){
+		//从目录块中读取目录信息到data_blk
+		if (read_cpy_data_block(par_dir_blk, data_blk) == -1){
+			free(data_blk);free(file_dir);free(m);free(n);
+			printf("错误：create_file_dir:从目录块中读取目录信息到data_blk时出错\n\n");return -ENOENT;
+		}
+
+		file_dir =(struct file_directory*) data_blk->data;
+		offset = 0;
+		//标注data_blk是否为空
+		pos = data_blk->size;
 		
-	//遍历父目录下的所有文件和目录，如果已存在同名文件或目录，返回-1
-	//一个文件一定是连续存放的
-	if ((res = exist_check(file_dir, m, n, &offset, &pos, data_blk->size, flag))) 		{
-		free(data_blk);free(file_dir);free(m);free(n);
-		printf("错误：create_file_dir:exist_check检测到该文件（目录）已存在，或出错\n\n");return res=-1;
+		//遍历父目录下的所有文件和目录，如果已存在同名文件或目录，返回-1
+		//一个文件一定是连续存放的
+		if ((res = exist_check(file_dir, m, n, &offset, &pos, data_blk->size, flag))){
+			free(data_blk);
+			free(file_dir);
+			free(m);free(n);
+			printf("错误：create_file_dir:exist_check检测到该文件（目录）已存在，或出错\n\n");return res=-1;
+		}
+		//data_blk->nNextBlock==0记得这个鬼东西
+		if(data_blk->nNextBlock==-1||data_blk->nNextBlock==0){
+			break;
+		}else{
+			par_dir_blk = data_blk->nNextBlock;
+		}
 	}
 
 	printf("create_file_dir:没有重名的文件或目录，开始创建文件\n\n");
@@ -526,6 +733,22 @@ int create_file_dir(const char* path, int flag) {
 	if (pos == data_blk->size) 	{
 		if (data_blk->size > MAX_DATA_IN_BLOCK) 		{
 			//当前块放不下目录内容,you should add some code here
+			printf("create_file_dir:当前块放不下文件,添加一个块\n");
+			//为父目录文件新增一个块
+			if ((res = increase_blk(par_dir_blk, file_dir, data_blk, tmp, m, n, flag))) 
+			{
+				free(m);
+				free(n);
+				free(data_blk);
+				free(file_dir);
+				printf("error:increase_blk出现错误\n");
+				return res;
+			}
+			free(m);
+			free(n);
+			free(data_blk);
+			free(file_dir);
+			return 0;
 		} 
 		else 	{//块容量足够，直接加size
 			data_blk->size += sizeof(struct file_directory);
@@ -538,12 +761,7 @@ int create_file_dir(const char* path, int flag) {
 
 		while (offset < pos) file_dir++;
 	}
-	//给新建的file_directory赋值
-	strcpy(file_dir->fname, m);
-	if (flag == 1 && *n!='\0')	strcpy(file_dir->fext, n);
-	file_dir->fsize = 0;
-	file_dir->flag = flag;
-
+	init_file_data(file_dir,m,n,flag);
 	//为新建的文件申请一个空闲块
 	if ((res = get_empty_blk(1, tmp)) == 1)	file_dir->nStartBlock = *tmp;
 	else 	{
@@ -554,6 +772,9 @@ int create_file_dir(const char* path, int flag) {
 	free(tmp);
 	//将要创建的文件或目录信息写入上层目录中
 	write_data_block(par_dir_blk, data_blk);
+
+
+
 	data_blk->size = 0;
 	data_blk->nNextBlock = -1;
 	strcpy(data_blk->data, "\0");
@@ -562,8 +783,17 @@ int create_file_dir(const char* path, int flag) {
 	write_data_block(file_dir->nStartBlock, data_blk);
 	
 	printf("m=%s,n=%s\n\n",m,n);
+	// time_t current_time = time(NULL);
+	// file_dir->atime = time(NULL);
+	// file_dir->mtime = time(NULL);
 
-	free(data_blk);free(m);free(n);
+	// // 设置文件的所有者和权限（示例中使用了默认值）
+	// file_dir->uid = 0; // 设置为用户ID为0，即默认所有者
+	// file_dir->mode = 0777; // 设置默认权限为777，即所有权限都开放
+
+	free(data_blk);
+	free(m);
+	free(n);
 	printf("create_file_dir：创建文件成功，函数结束返回\n\n");
 	return 0;
 }
@@ -580,11 +810,13 @@ int remove_file_dir(const char *path, int flag) {
 	attr->fext,attr->fsize,attr->nStartBlock,attr->flag);
 	//flag与指定的不一致，则返回相应错误信息
 	if (flag == 1 && attr->flag == 2)	{
-		free(attr); printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -EISDIR;
+		free(attr); 
+		printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -EISDIR;
 	} 
 	else if (flag == 2 && attr->flag == 1) 
 	{
-		free(attr); printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -ENOTDIR;
+		free(attr); 
+		printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -ENOTDIR;
 	}
 	//清空该文件从起始块开始的后续块
 	struct data_block* data_blk = malloc(sizeof(struct data_block));
@@ -594,7 +826,8 @@ int remove_file_dir(const char *path, int flag) {
 	} 
 	else if (!path_is_emp(path)) //只能删除空的目录，目录非空返回错误信息
 	{ 
-		free(data_blk);free(attr);
+		free(data_blk);
+		free(attr);
 		printf("remove_file_dir：要删除的目录不为空，删除失败，函数结束返回\n\n");
 		return -ENOTEMPTY;
 	}
@@ -630,22 +863,6 @@ static void* WFS_init(struct fuse_conn_info *conn) {
 	return 0;
 }
 
-/*struct stat {
-        mode_t     st_mode;       //文件对应的模式，文件，目录等
-        ino_t      st_ino;       //inode节点号
-        dev_t      st_dev;        //设备号码
-        dev_t      st_rdev;       //特殊设备号码
-        nlink_t    st_nlink;      //文件的连接数
-        uid_t      st_uid;        //文件所有者
-        gid_t      st_gid;        //文件所有者对应的组
-        off_t      st_size;       //普通文件，对应的文件字节数
-        time_t     st_atime;      //文件最后被访问的时间
-        time_t     st_mtime;      //文件内容最后被修改的时间
-        time_t     st_ctime;      //文件状态改变时间
-        blksize_t st_blksize;    //文件内容对应的块大小
-        blkcnt_t   st_blocks;     //文件内容对应的块数量
-      };*/
-
 //该函数用于读取文件属性（通过对象的路径获取文件的属性，并赋值给stbuf）
 static int WFS_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)  {
 	int res = 0;
@@ -653,7 +870,9 @@ static int WFS_getattr(const char *path, struct stat *stbuf, struct fuse_file_in
 
 	//非根目录
 	if (get_fd_to_attr(path, attr) == -1) 	{
-		free(attr);	printf("WFS_getattr：get_fd_to_attr时发生错误，函数结束返回\n\n");return -ENOENT;
+		free(attr);	
+		printf("WFS_getattr：get_fd_to_attr时发生错误，函数结束返回\n\n");
+		return -ENOENT;
 	}
 
 	memset(stbuf, 0, sizeof(struct stat));//将stat结构中成员的值全部置0
@@ -661,15 +880,31 @@ static int WFS_getattr(const char *path, struct stat *stbuf, struct fuse_file_in
 	{//从path判断这个文件是		一个目录	还是	一般文件
 		printf("WFS_getattr：这个file_directory是一个目录\n\n");
 		stbuf->st_mode = S_IFDIR | 0666;//设置成目录,S_IFDIR和0666（8进制的文件权限掩码），这里进行或运算
-		//stbuf->st_nlink = 2;//st_nlink是连到该文件的硬连接数目,即一个文件的一个或多个文件名。说白点，所谓链接无非是把文件名和计算机文件系统使用的节点号链接起来。因此我们可以用多个文件名与同一个文件进行链接，这些文件名可以在同一目录或不同目录。
+		// stbuf->st_nlink = 2;//st_nlink是连到该文件的硬连接数目,即一个文件的一个或多个文件名。说白点，所谓链接无非是把文件名和计算机文件系统使用的节点号链接起来。因此我们可以用多个文件名与同一个文件进行链接，这些文件名可以在同一目录或不同目录。
+
+
 	} 
 	else if (attr->flag==1) 	{
 		printf("WFS_getattr：这个file_directory是一个文件\n\n");
 		stbuf->st_mode = S_IFREG | 0666;//该文件是	一般文件
-		stbuf->st_size = attr->fsize;
-		//stbuf->st_nlink = 1;
+		// stbuf->st_size = attr->fsize;
+		// stbuf->st_nlink = 1;
 	} 
-	else {printf("WFS_getattr：这个文件（目录）不存在，函数结束返回\n\n");;res = -ENOENT;}//文件不存在
+	else 
+	{
+		printf("WFS_getattr：这个文件（目录）不存在，函数结束返回\n\n");
+		res = -ENOENT;
+	}//文件不存在
+	stbuf->st_size = attr->fsize;
+	// stbuf->st_ino = attr->nStartBlock; // inode 节点号
+    stbuf->st_uid = attr->uid; // 文件所有者的用户 ID
+    // // stbuf->st_gid = 0; // 文件所有者的组 ID，设置为 0 即可
+    stbuf->st_atime = attr->atime; // 文件最后访问时间
+    stbuf->st_mtime = attr->mtime; // 文件内容最后修改时间
+	
+    // stbuf->st_ctime = 0; // 文件状态改变时间，设置为 0 即可
+    // stbuf->st_blksize = FS_BLOCK_SIZE; // 文件内容对应的块大小
+    // stbuf->st_blocks = (attr->fsize + FS_BLOCK_SIZE - 1) / FS_BLOCK_SIZE; // 文件内容占用的块数量
 	
 	printf("WFS_getattr：getattr成功，函数结束返回\n\n");
 	free(attr);
@@ -699,6 +934,7 @@ static int WFS_open(const char *path, struct fuse_file_info *fi) {
 //步骤：① 先读取该path所指文件的file_directory；② 然后根据nStartBlock读出文件内容
 static int WFS_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
 	printf("WFS_read：函数开始\n\n");
+	
 	struct file_directory *attr = malloc(sizeof(struct file_directory));
 
 	//读取该path所指对象的file_directory
@@ -713,7 +949,10 @@ static int WFS_read(const char *path, char *buf, size_t size, off_t offset, stru
 	struct data_block *data_blk = malloc(sizeof(struct data_block));
 	//根据文件信息读取文件内容
 	if (read_cpy_data_block(attr->nStartBlock, data_blk) == -1) 	{
-		free(attr);free(data_blk);printf("错误：WFS_read：读取文件起始块内容失败，函数结束返回\n\n"); return -1;
+		free(attr);
+		free(data_blk);
+		printf("错误：WFS_read：读取文件起始块内容失败，函数结束返回\n\n"); 
+		return -1;
 	}
 
 	//查找文件数据块,读取并读入buf中
@@ -721,12 +960,57 @@ static int WFS_read(const char *path, char *buf, size_t size, off_t offset, stru
 	if (offset < attr->fsize) 	{
 		if (offset + size > attr->fsize) size = attr->fsize - offset;
 	} 
-	else size = 0;
+	else{
+		 size = 0;
+	}
+	//块偏移量
+	int blk_num = offset / MAX_DATA_IN_BLOCK;//到达offset处要跳过的块的数目
+	//块内偏移量
+	int blk_offset = offset % MAX_DATA_IN_BLOCK;//offset所在块的偏移量
+	//跳过offset之前的block块,找到offset所指的开始位置的块
+	for (int i = 0; i < blk_num; i++) 
+	{
+		//i < blk_num期间读取到data_blk->nNextBlock == -1也是有问题的
+		if (read_cpy_data_block(data_blk->nNextBlock, data_blk) == -1 || data_blk->nNextBlock == -1) 
+		{
+			printf("错误：WFS_read：读取文件起始块内容失败，函数结束返回\n\n"); 
+			free(attr); free(data_blk);	return -1;
+		}
+	}
 
-	char *pt = data_blk->data;//先读出offset所在块的数据
-	pt += offset;//将数据指针移动到offset所指的位置
+
+	//指向offset所在块
+	char *pt = data_blk->data;
+	//指向块内所在位置
+	pt += blk_offset;
+	if(size<=MAX_DATA_IN_BLOCK - blk_offset){
+		strncpy(buf,pt,size);
+	}else{
+		//第一块读取量以及下一块buf读取偏移量
+		int first_offset = MAX_DATA_IN_BLOCK-blk_offset;
+		strncpy(buf,pt,first_offset);
+		//剩余读取量
+		int temp = size-first_offset;
+		//数据大小减去已经读大小大于0则进入while循环
+		while (temp>0)
+		{
+			if(read_cpy_data_block(data_blk->nNextBlock,data_blk)==-1){
+				printf("错误：WFS_read：读取文件起始块内容失败，函数结束返回\n\n"); 
+				free(attr); free(data_blk);	return -1;
+			}
+			if(temp>MAX_DATA_IN_BLOCK){
+				memcpy(buf +size-temp, data_blk->data, MAX_DATA_IN_BLOCK);//buf继续继续读取数据
+				// first_offset += MAX_DATA_IN_BLOCK;
+				temp-=MAX_DATA_IN_BLOCK;
+			}else{
+				memcpy(buf +size-temp, data_blk->data, temp);
+				break;
+			}
+		}
+		
+	}
+
 	
-	strncpy(buf, pt, size);
 
 	printf("WFS_read：文件读取成功，函数结束返回\n\n");
 	free(attr);free(data_blk);
@@ -752,27 +1036,136 @@ static int WFS_write (const char *path, const char *buf, size_t size, off_t offs
 	if (start_blk == -1) 	{
 		printf("WFS_write：该文件为空（无起始块），函数结束返回\n\n");free(attr); return -errno;
 	}
-
 	int p_offset = offset;//p_offset用来记录修改前最后一个文件块的位置
 	struct data_block *data_blk = malloc(sizeof(struct data_block));
+	while (1)
+	{
+		if(read_cpy_data_block(start_blk,data_blk)==-1){
+			printf("WFS_write：读取数据块失败,函数结束返回\n\n");
+			return -errno;
+		}
+		//offse没有跨块
+		if(offset<-data_blk->size){
+			break;
+		}
+		offset-=data_blk->size;
+		start_blk=data_blk->nNextBlock;
+	}
+	
 
-	read_cpy_data_block(start_blk,data_blk);
+	// read_cpy_data_block(start_blk,data_blk);
+	
 	char* pt = data_blk->data;
 	//找到offset所在块中offset位置
 	pt += offset;
-
-	int towrite = size;
-	int writen = 0;
-
-	strncpy(pt, buf, towrite);	//写入长度为towrite的内容
-	buf += towrite;	//移到字符串待写处
-	data_blk->size += towrite;	//该数据块的size增加已写数据量towrite
-	writen += towrite;	//buf中已写的数据量
+	//剩余空间足够写入size大小的数据
+	if (size<MAX_DATA_IN_BLOCK-offset)
+	{
+		strncpy(pt,buf,size);
+		data_blk->size+=size;
+		data_blk->nNextBlock = -1;
+		buf += size;
+		write_data_block(start_blk, data_blk);
 	
-	size = writen;
-	write_data_block(start_blk,data_blk);
+
+	}else{
+		//已经写入数据量
+		int success_write = MAX_DATA_IN_BLOCK-offset;
+		strncpy(pt,buf,success_write);
+		data_blk->size += success_write;
+		buf += success_write;
+		//剩余写入数据量
+		int leftover_write = size -success_write;
+		data_blk->size+=success_write;
+		long *next_blk = malloc(sizeof(long));
+		//计算剩余数据需要开辟多少块
+		int blk_num;
+		//需多开辟一块的情况
+		if(leftover_write>0){
+			//计算剩余数据需要开辟多少块
+			// int blk_num;
+			if(leftover_write%MAX_DATA_IN_BLOCK!=0){
+				blk_num = get_empty_blk(leftover_write/MAX_DATA_IN_BLOCK+1,next_blk);
+			}else{
+				blk_num = get_empty_blk(leftover_write/MAX_DATA_IN_BLOCK,next_blk);
+			}
+			if (blk_num == -1)
+			{
+				free(attr); 
+				free(data_blk); 
+				free(next_blk);
+				printf("WFS_write：文件没有写完，申请空闲块失败，函数结束返回\n\n"); return -errno;
+			}
+			data_blk->nNextBlock = *next_blk;
+			//更新了data_blk->nNextBlock所以需要将data_blk重新写入fp
+			write_data_block(start_blk, data_blk);
+			while(1){
+				for (int i = 0; i < blk_num; i++)
+				{
+					data_blk = data_blk->nNextBlock;
+					data_blk->size = 0;
+					data_blk ->nNextBlock =-1;
+					
+					if (leftover_write<MAX_DATA_IN_BLOCK)
+					{
+						strncpy(data_blk->data, buf, leftover_write);
+						data_blk->size += leftover_write;
+						
+						buf += leftover_write;
+
+						leftover_write = 0;
+					}else{
+						strncpy(data_blk->data, buf, MAX_DATA_IN_BLOCK);
+						data_blk->size += MAX_DATA_IN_BLOCK;
+						buf += MAX_DATA_IN_BLOCK;
+						leftover_write -= MAX_DATA_IN_BLOCK;
+					}
+					if (leftover_write == 0){
+						data_blk->nNextBlock = -1;
+						write_data_block(*next_blk, data_blk);
+						break;
+					}else{
+						data_blk->nNextBlock = *next_blk + 1;
+					} 
+					//更新块
+					write_data_block(*next_blk, data_blk);
+					*next_blk = *next_blk + 1;
+					
+				}
+				if (leftover_write == 0){
+					break;
+				}else{
+					if(leftover_write%MAX_DATA_IN_BLOCK!=0){
+						blk_num = get_empty_blk(leftover_write/MAX_DATA_IN_BLOCK+1,next_blk);
+					}else{
+						blk_num = get_empty_blk(leftover_write/MAX_DATA_IN_BLOCK,next_blk);
+					}
+					if (blk_num == -1)
+					{
+						free(attr); 
+						free(data_blk); 
+						free(next_blk);
+						printf("WFS_write：文件没有写完，申请空闲块失败，函数结束返回\n\n"); return -errno;
+					}
+					
+
+				}
+
+				
+			}
+
+
+		}
+	}
+	//清理nextblock
+	long next_blok = data_blk->nNextBlock;
+	ClearBlocks(next_blok, data_blk);	
 	//修改被写文件file_directory的文件大小信息为:写入起始位置+写入内容大小
 	attr->fsize = p_offset + size;
+	time_t now_time;
+    time(&now_time);
+	attr->atime = now_time;
+	attr->mtime = now_time;
 	if (setattr(path, attr,1) == -1) size = -errno;
 	
 	printf("WFS_write：文件写入成功，函数结束返回\n\n");
@@ -810,9 +1203,9 @@ static int WFS_access(const char *path, int flag) {
 
 //终端中ls -l读取目录的操作会使用到这个函数，因为fuse创建出来的文件系统是在用户空间上的
 //这个函数用来读取目录，并将目录里面的文件名加入到buf里面
-//步骤：① 读取path所对应目录的file_directory，找到该目录文件的nStartBlock；
 //	   ② 读取nStartBlock里面的所有file_directory，并用filler把 (文件+后缀)/目录 名加入到buf里面
 static int WFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler,off_t offset, struct fuse_file_info *fi)//,enum use_readdir_flags flags)
+//步骤：① 读取path所对应目录的file_directory，找到该目录文件的nStartBlock；
 {
 	struct data_block *data_blk;
 	struct file_directory *attr;
