@@ -109,6 +109,7 @@ int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, in
 	if(!m) return -errno;//路径为空
 	//跳过第一个'/'
 	m++;
+	printf("\n\n此时m指向的路径%s\n\n",m);
 	
 	//找寻下一个‘/’的位置
 	n=strchr(m,'/');//看是否有二级路径
@@ -131,7 +132,7 @@ int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, in
 			free(attr);	return -ENOENT;
 		}
 	}	
-	printf("divide_path检查：tmp_path=%s\nm=%s\nn=%s\n\n",tmp_path,m,n);
+	// printf("divide_path检查：tmp_path=%s\nm=%s\nn=%s\n\n",tmp_path,m,n);
 	//如果找不到二级路径'/'，说明要创建的对象是： /目录 或 /文件
 	//那么这个路径的父目录为根目录，直接读出来
 	if(n==NULL)	{
@@ -147,8 +148,12 @@ int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, in
 		printf("divide_path:这是文件，有后缀名\n\n");
 		n=strchr(m,'.');
 		if(n!=NULL)		{
+			printf("\n\n此时n!=null时m指向的路径%s\n\n",m);
+
 			*n='\0';//截断tmp_path
 			n++;//此时n指针指向后缀名的第一位
+			printf("\n\n此时n!=null时m指向的路径%s\n\n",m);
+			printf("\n\n此时n!=null时n指向的路径%s\n\n",n);
 		}
 	}
 
@@ -184,7 +189,9 @@ int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, in
 
 	*name = '\0';
 	*ext = '\0';
-	if (m != NULL) strcpy(name, m);
+	if (m != NULL && *m!= '\0') {
+		strcpy(name, m);}
+	
 	if (n != NULL) strcpy(ext, n);
 	
 	printf("已经获取到父目录的file_directory（attr），检查一下：\n\n");
@@ -516,11 +523,12 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 	}
 	
 
-	// n = strchr(m,'.');
-	// if(n!=NULL){
-	// 	*n='\0';
-	// 	n++;
-	// }
+	n = strchr(m,'.');
+	if(n!=NULL){
+		
+		*n='\0';
+		n++;
+	}
 
 
 
@@ -544,28 +552,36 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 		i=0;
 		struct file_directory *file_dir = (struct file_directory *)data_blk->data;
 		while (i<512/sizeof(struct file_directory)) {
-			char tempfilename[20];
-			strcpy(tempfilename,file_dir->fname);
-			printf("tempfilename的值%s\n",tempfilename);
-			if (file_dir->fext[0]!=0) {
-			strcat(tempfilename,".");
-			strcat(tempfilename,file_dir->fext);
-			printf("tempfilename的值%s\n",tempfilename);
-			}
-			if(strcmp(m,tempfilename)==0) { //found speafied file
-				attr->flag=file_dir->flag;  // for file
-				strcpy(attr->fname, file_dir->fname);
-				strcpy(attr->fext, file_dir->fext);
-				attr->atime = file_dir->atime;
-				attr->mtime = file_dir->mtime;
-				attr->mode = file_dir->mode;
-				attr->uid = file_dir->uid;
-
-				attr->fsize = file_dir->fsize;
-				attr->nStartBlock = file_dir->nStartBlock;
+			if (file_dir->flag != 0 && strcmp(file_dir->fname, m) == 0 && (n == NULL || strcmp(file_dir->fext, n) == 0 ))
+			{
+				read_cpy_file_dir(attr,file_dir);
 				free(data_blk);
 				return(0);
 			}
+			
+			// char tempfilename[20];
+			// strcpy(tempfilename,file_dir->fname);
+			// printf("tempfilename的值%s\n",tempfilename);
+			// if (file_dir->fext[0]!=0) {
+			// 	strcat(tempfilename,".");
+			// 	strcat(tempfilename,file_dir->fext);
+			// 	printf("tempfilename的值%s\n",tempfilename);
+			// }
+			// if(strcmp(m,tempfilename)==0) { //found speafied file
+			// 	read_cpy_file_dir(attr,file_dir);
+			// 	// attr->flag=file_dir->flag;  // for file
+			// 	// strcpy(attr->fname, file_dir->fname);
+			// 	// strcpy(attr->fext, file_dir->fext);
+			// 	// attr->atime = file_dir->atime;
+			// 	// attr->mtime = file_dir->mtime;
+			// 	// attr->mode = file_dir->mode;
+			// 	// attr->uid = file_dir->uid;
+
+			// 	// attr->fsize = file_dir->fsize;
+			// 	// attr->nStartBlock = file_dir->nStartBlock;
+			// 	free(data_blk);
+			// 	return(0);
+			// }
 			file_dir++;
 			i++;
 		}
@@ -586,6 +602,9 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 			return -1;
 		}
 	}
+	printf("\n\nget_fd_to_attr结束\n\n");
+	free(data_blk);
+	return -1;
 }
 
 
@@ -713,7 +732,8 @@ int create_file_dir(const char* path, int flag) {
 			free(data_blk);
 			free(file_dir);
 			free(m);free(n);
-			printf("错误：create_file_dir:exist_check检测到该文件（目录）已存在，或出错\n\n");return res=-1;
+			printf("错误：create_file_dir:exist_check检测到该文件（目录）已存在，或出错\n\n");
+			return res=-1;
 		}
 		//data_blk->nNextBlock==0记得这个鬼东西
 		if(data_blk->nNextBlock==-1||data_blk->nNextBlock==0){
@@ -971,7 +991,7 @@ static int WFS_read(const char *path, char *buf, size_t size, off_t offset, stru
 	for (int i = 0; i < blk_num; i++) 
 	{
 		//i < blk_num期间读取到data_blk->nNextBlock == -1也是有问题的
-		if (read_cpy_data_block(data_blk->nNextBlock, data_blk) == -1 || data_blk->nNextBlock == -1) 
+		if (read_cpy_data_block(data_blk->nNextBlock, data_blk) == -1 ) 
 		{
 			printf("错误：WFS_read：读取文件起始块内容失败，函数结束返回\n\n"); 
 			free(attr); free(data_blk);	return -1;
@@ -1009,9 +1029,6 @@ static int WFS_read(const char *path, char *buf, size_t size, off_t offset, stru
 		}
 		
 	}
-
-	
-
 	printf("WFS_read：文件读取成功，函数结束返回\n\n");
 	free(attr);free(data_blk);
 	return size;
@@ -1023,6 +1040,8 @@ static int WFS_read(const char *path, char *buf, size_t size, off_t offset, stru
 static int WFS_write (const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
 	printf("WFS_write：函数开始\n\n");
+	printf("\n\n写入的内容%s\n\n",buf);
+	printf("\n\n写入的路径%s\n\n",path);
 	struct file_directory *attr = malloc(sizeof(struct file_directory));
 	//打开path所指的对象，将其file_directory读到attr中
 	get_fd_to_attr(path, attr);
@@ -1046,6 +1065,7 @@ static int WFS_write (const char *path, const char *buf, size_t size, off_t offs
 		}
 		//offse没有跨块
 		if(offset<-data_blk->size){
+			printf("\n\n没有跨快\n\n");
 			break;
 		}
 		offset-=data_blk->size;
@@ -1056,6 +1076,7 @@ static int WFS_write (const char *path, const char *buf, size_t size, off_t offs
 	// read_cpy_data_block(start_blk,data_blk);
 	
 	char* pt = data_blk->data;
+	
 	//找到offset所在块中offset位置
 	pt += offset;
 	//剩余空间足够写入size大小的数据
