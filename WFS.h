@@ -37,7 +37,7 @@ struct data_block {
     char data[MAX_DATA_IN_BLOCK];// And all the rest of the space in the block can be used for actual data storage.
 };
 
-char *disk_path="/tmp/diskimg";
+char *disk_path="/home/zhc/wfs/diskimg";
 
 //辅助函数声明
 void read_cpy_file_dir(struct file_directory *a,struct file_directory *b);
