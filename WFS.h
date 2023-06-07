@@ -36,28 +36,37 @@ struct data_block {
     long nNextBlock; //（该文件太大了，一块装不下，所以要有下一块的地址）   long的大小为4Byte
     char data[MAX_DATA_IN_BLOCK];// And all the rest of the space in the block can be used for actual data storage.
 };
-
+//磁盘存放路径，程序运行时请自行修改对应路径
 char *disk_path="/home/zhc/wfs/diskimg";
-
-//辅助函数声明
+//将后者file_directory *b中字段的内容赋值给struct file_directory *a
 void read_cpy_file_dir(struct file_directory *a,struct file_directory *b);
+//打开文件，将FILE指针移动到文件的第blk_no块位置读取该块数据给data_block *data_blk
 int read_cpy_data_block(long blk_no,struct data_block *data_blk);
+//打开文件，将FILE指针移动到文件的第blk_no块位置将data_block *data_blk数据写入
 int write_data_block(long blk_no,struct data_block *data_blk);
+//分割路径获取文件/目录的名称和后缀名以及父目录的起始块和file_directory
 int divide_path(char *name, char *ext, const char *path, long *par_dir_stblk, int flag, int *par_size);
+//找寻该目录下是否已经存在相同的struct file_directory *file_dir
 int exist_check(struct file_directory *file_dir, char *p, char *q, int *offset, int *pos, int size, int flag);
+//设置文件的第long start_blk开为已经使用块
 int set_blk_use(long start_blk,int flag);
+//const char* path找寻该路径是否已经存在文件或目录
 int path_is_emp(const char* path);
+// 将file_directory的数据赋值给path相应文件或目录的file_directory
 int setattr(const char* path, struct file_directory* attr, int flag);
+//从next_blk起清空data_blk后续块
 void ClearBlocks(long next_blk, struct data_block* data_blk);
+//采用首次适应法找寻文件中符合的第一片大小大于num的连续区域，返回找到的最多空闲块（不一定为num）
 int get_empty_blk(int num, long* start_blk);
-
-//新增函数
+//数据存取不够时扩展一个新块
 int increase_blk(long par_dir_stblk, struct file_directory *file_dir,struct data_block *data_blk, long *tmp, char*p, char*q, int flag);
+//设置struct file_directory *file_dir中的时间，uid，权限等字段
 void init_file_data(struct file_directory *file_dir, char *m, char *n, int flag);
-
-//功能函数声明
+//根据文件的路径，到相应的目录寻找该文件的file_directory，并赋值给attr
 int get_fd_to_attr(const char * path,struct file_directory *attr);
+//创建path所指的文件或目录的file_directory，并为该文件（目录）申请空闲块，创建成功返回0，创建失败返回-1
 int create_file_dir(const char* path, int flag);
+//删除path所指的文件或目录的file_directory和文件的数据块，成功返回0，失败返回-1
 int remove_file_dir(const char *path, int flag);
 
 

@@ -32,11 +32,11 @@ void init_file_data(struct file_directory *file_dir, char *m, char *n, int flag)
         file_dir->mtime = now_time;
         if (flag == 1)
         {
-                file_dir->mode = S_IFREG | 0766;
+                file_dir->mode = S_IFREG | 0666;
         }
         else if (flag == 2)
         {
-                file_dir->mode = S_IFDIR | 0766;
+                file_dir->mode = S_IFDIR | 0666;
         }
         file_dir->uid = getuid();
 }
@@ -396,53 +396,6 @@ int setattr(const char *path, struct file_directory *attr, int flag)
 	// 找遍整个目录都没找到该文件就直接返回-1
 	return -1;
 }
-//将file_directory的数据赋值给path相应文件或目录的file_directory	(!!!!!)
-// int setattr(const char* path, struct file_directory* attr, int flag)  {
-// 	printf("setattr：函数开始\n\n");
-// 	int res,par_size;
-// 	struct data_block* data_blk=malloc(sizeof(struct data_block));
-// 	char *m=malloc(15*sizeof(char)),*n=malloc(15*sizeof(char));
-// 	long start_blk;
-
-// 	//path所指文件的file_directory存储在该文件所在的父目录的文件块里面，所以要进行路径分割
-// 	if((res=divide_path(m,n,path,&start_blk,flag,&par_size)))	{
-// 		printf("错误：setattr：divide_path失败，函数返回\n\n");
-// 		free(m);free(n);return res;
-// 	}
-
-// 	//下面就是寻找文件块的位置了，当然如果目录太大有可能要继续读下一个块
-// 	//获取到父目录文件的起始块位置，我们就读出这个起始块
-// 	if(read_cpy_data_block(start_blk,data_blk)==-1)	{
-// 		printf("错误：setattr：寻找文件块位置do_while循环内：读取文件块失败，函数结束返回\n\n");
-// 		res=-1;free(data_blk);return res;
-// 	}
-// 	//start_blk=data_blk->nNextBlock;
-// 	struct file_directory *file_dir=(struct file_directory*)data_blk->data;
-// 	int offset = 0;
-// 	while (offset < data_blk->size) 	{
-// 		//循环遍历块内容
-// 		//找到该文件
-// 		if (file_dir->flag != 0 && strcmp(m, file_dir->fname) == 0 && (*n == '\0' || strcmp(n, file_dir->fext) == 0))
-// 		{
-// 			printf("setattr：找到相应路径的file_directory，可以进行回写了\n\n");
-// 			//设置为attr指定的属性
-// 			read_cpy_file_dir(file_dir,attr);
-// 			res = 0;
-// 			free(m);free(n);
-// 			//将修改后的目录信息写回磁盘文件
-// 			if (write_data_block(start_blk, data_blk) == -1) {printf("错误：setattr：while循环内回写数据块失败\n\n");res = -1;}
-// 			free(data_blk);return res;
-// 		}
-// 		//读下一个文件
-// 		file_dir++;
-// 		offset += sizeof(struct file_directory);
-// 	}
-// 	//如果在这一个块找不到该文件，我们继续寻找该目录的下一个块，不过前提是这个目录文件有下一个块
-// 	//}while(data_blk->nNextBlock!=-1 && data_blk->nNextBlock!=0);
-// 	printf("setattr：赋值成功，函数结束返回\n\n");
-// 	//找遍整个目录都没找到该文件就直接返回-1
-// 	return -1;
-// }
 
 //从next_blk起清空data_blk后续块
 void ClearBlocks(long next_blk, struct data_block* data_blk) {
@@ -609,7 +562,7 @@ int get_fd_to_attr(const char * path,struct file_directory *attr) {
 	if (n!=NULL)
 	{
 		*n='\0';
-		//路径如/hehe/a.txt所以采用递归查找/hehe
+		
 		get_fd_to_attr(tmp_path, attr);
 		start_blk = attr->nStartBlock;
 		n++;
@@ -721,10 +674,15 @@ int increase_blk(long par_dir_stblk, struct file_directory *file_dir,struct data
 	//找到的话直接给上层目录增加一个块
 	data_blk->nNextBlock=new_blk;
 	
+	
 	//因为添加了new_blk的位置所以需要在fp中重写之之前的data_blk
 	write_data_block(par_dir_stblk, data_blk);
+
+	free(data_blk);
+	data_blk = malloc(sizeof(struct data_block));
+
 	//为新块添加信息
-	data_blk->size+=sizeof(struct file_directory);
+	data_blk->size =sizeof(struct file_directory);
 	data_blk->nNextBlock=-1;
 	file_dir=(struct file_directory*)data_blk->data;
 	//写入文件或目录的名称
@@ -806,7 +764,7 @@ int create_file_dir(const char* path, int flag) {
 	//经过exist_check函数，offset应该指向匹配到的文件的file_dir的位置，如果没找到该文件，则offset=data_blk->size
 	file_dir += offset / sizeof(struct file_directory);
 	printf("\n\ncreate_file_dir:offset的值：%d\n\n",offset);
-	printf("\n\ncreate_file_dir:data_blk->size的值：%d\n\n",data_blk->size);
+	printf("\n\ncreate_file_dir:data_blk->size的值：%ld\n\n",data_blk->size);
 	printf("\n\ncreate_file_dir:pos的值：%d\n\n",pos);
 
 
@@ -880,48 +838,6 @@ int create_file_dir(const char* path, int flag) {
 
 
 //删除path所指的文件或目录的file_directory和文件的数据块，成功返回0，失败返回-1
-// int remove_file_dir(const char *path, int flag) {
-// 	printf("remove_file_dir：函数开始\n\n");
-// 	struct file_directory *attr=malloc(sizeof(struct file_directory));
-// 	//读取文件属性
-// 	if (get_fd_to_attr(path, attr) == -1) 	{
-// 		free(attr);printf("错误：remove_file_dir：get_fd_to_attr失败，函数结束返回\n\n");	return -ENOENT;
-// 	}
-// 	printf("检查attr:fname=%s，fext=%s，fsize=%ld，nstartblock=%ld，flag=%d\n\n",attr->fname,\
-// 	attr->fext,attr->fsize,attr->nStartBlock,attr->flag);
-// 	//flag与指定的不一致，则返回相应错误信息
-// 	if (flag == 1 && attr->flag == 2)	{
-// 		free(attr); 
-// 		printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -EISDIR;
-// 	} 
-// 	else if (flag == 2 && attr->flag == 1) 
-// 	{
-// 		free(attr); 
-// 		printf("错误：remove_file_dir：要删除的对象flag不一致，删除失败，函数结束返回\n\n");return -ENOTDIR;
-// 	}
-// 	//清空该文件从起始块开始的后续块
-// 	struct data_block* data_blk = malloc(sizeof(struct data_block));
-// 	if (flag == 1) 	{
-// 		long next_blk = attr->nStartBlock;
-// 		ClearBlocks(next_blk, data_blk);
-// 	} 
-// 	else if (!path_is_emp(path)) //只能删除空的目录，目录非空返回错误信息
-// 	{ 
-// 		free(data_blk);
-// 		free(attr);
-// 		printf("remove_file_dir：要删除的目录不为空，删除失败，函数结束返回\n\n");
-// 		return -ENOTEMPTY;
-// 	}
-
-// 	attr->flag = 0; //被删除的文件或目录的file_directory设置为未使用
-// 	if (setattr(path, attr, flag) == -1) 	{
-// 		printf("remove_file_dir：setattr失败，函数结束返回\n\n");
-// 		free(data_blk);free(attr);return -1;
-// 	}
-// 	printf("remove_file_dir：删除成功，函数结束返回\n\n");
-// 	free(data_blk);free(attr);
-// 	return 0;
-// }
 int remove_file_dir(const char *path, int flag)
 {
 	printf("remove_file_dir：函数开始\n");
@@ -983,8 +899,8 @@ int remove_file_dir(const char *path, int flag)
 //文件系统初始化函数，载入文件系统的时候系统需要知道这个文件系统的大小（以块为单位）
 static void* WFS_init(struct fuse_conn_info *conn) {
 
-	(void) conn;
-	
+	(void*)conn;
+
 	FILE * fp = NULL;
 	fp = fopen(disk_path, "r+");
 	if (fp == NULL) {
